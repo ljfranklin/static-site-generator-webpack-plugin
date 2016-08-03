@@ -12,66 +12,68 @@ function StaticSiteGeneratorWebpackPlugin(renderSrc, outputPaths, locals, scope)
 StaticSiteGeneratorWebpackPlugin.prototype.apply = function(compiler) {
   var self = this;
 
-  compiler.plugin('emit', function(compiler, done) {
-    var renderPromises;
+  compiler.plugin('compilation', function(compilation, params) {
+    compilation.plugin('optimize-chunk-assets', function(_, done) {
+      var renderPromises;
 
-    var webpackStats = compiler.getStats();
-    var webpackStatsJson = webpackStats.toJson();
+      var webpackStats = compilation.getStats();
+      var webpackStatsJson = webpackStats.toJson();
 
-    try {
-      var asset = findAsset(self.renderSrc, compiler, webpackStatsJson);
+      try {
+        var asset = findAsset(self.renderSrc, compilation, webpackStatsJson);
 
-      if (asset == null) {
-        throw new Error('Source file not found: "' + self.renderSrc + '"');
-      }
-
-      var assets = getAssetsFromCompiler(compiler, webpackStatsJson);
-
-      var source = asset.source();
-      var render = evaluate(source, /* filename: */ self.renderSrc, /* scope: */ self.scope, /* includeGlobals: */ true);
-
-      if (render.hasOwnProperty('__esModule')) {
-        render = render['default'];
-      }
-
-      if (typeof render !== 'function') {
-        throw new Error('Export from "' + self.renderSrc + '" must be a function that returns an HTML string');
-      }
-
-      renderPromises = self.outputPaths.map(function(outputPath) {
-        var outputFileName = outputPath.replace(/^(\/|\\)/, ''); // Remove leading slashes for webpack-dev-server
-
-        if (!/\.(html?)$/i.test(outputFileName)) {
-            outputFileName = path.join(outputFileName, 'index.html');
+        if (asset == null) {
+          throw new Error('Source file not found: "' + self.renderSrc + '"');
         }
 
-        var locals = {
-          path: outputPath,
-          assets: assets,
-          webpackStats: webpackStats
-        };
+        var assets = getAssetsFromCompiler(compilation, webpackStatsJson);
 
-        for (var prop in self.locals) {
-          if (self.locals.hasOwnProperty(prop)) {
-            locals[prop] = self.locals[prop];
+        var source = asset.source();
+        var render = evaluate(source, /* filename: */ self.renderSrc, /* scope: */ self.scope, /* includeGlobals: */ true);
+
+        if (render.hasOwnProperty('__esModule')) {
+          render = render['default'];
+        }
+
+        if (typeof render !== 'function') {
+          throw new Error('Export from "' + self.renderSrc + '" must be a function that returns an HTML string');
+        }
+
+        renderPromises = self.outputPaths.map(function(outputPath) {
+          var outputFileName = outputPath.replace(/^(\/|\\)/, ''); // Remove leading slashes for webpack-dev-server
+
+          if (!/\.(html?)$/i.test(outputFileName)) {
+              outputFileName = path.join(outputFileName, 'index.html');
           }
-        }
 
-        return Promise
-          .fromNode(render.bind(null, locals))
-          .then(function(output) {
-            compiler.assets[outputFileName] = createAssetFromContents(output);
-          })
-          .catch(function(err) {
-            compiler.errors.push(err.stack);
-          });
-      });
+          var locals = {
+            path: outputPath,
+            assets: assets,
+            webpackStats: webpackStats
+          };
 
-      Promise.all(renderPromises).nodeify(done);
-    } catch (err) {
-      compiler.errors.push(err.stack);
-      done();
-    }
+          for (var prop in self.locals) {
+            if (self.locals.hasOwnProperty(prop)) {
+              locals[prop] = self.locals[prop];
+            }
+          }
+
+          return Promise
+            .fromNode(render.bind(null, locals))
+            .then(function(output) {
+              compilation.assets[outputFileName] = createAssetFromContents(output);
+            })
+            .catch(function(err) {
+              compilation.errors.push(err.stack);
+            });
+        });
+
+        Promise.all(renderPromises).nodeify(done);
+      } catch (err) {
+        compilation.errors.push(err.stack);
+        done();
+      }
+    });
   });
 };
 
